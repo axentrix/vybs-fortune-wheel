@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rive Wheel</title>
+
+<style>
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0f0f0f;
+  font-family: Arial, sans-serif;
+  overflow: hidden;
+}
+
+.page {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+}
+
+.rive-container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.rive-container.loaded {
+  opacity: 1;
+}
+
+#riveCanvas {
+  height: 80vh;
+  width: auto;
+  max-width: 100%;
+  display: block;
+}
+
+.preloader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f0f;
+  z-index: 10;
+  transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+
+.preloader.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loader-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.spinner {
+  width: 44px;
+  height: 44px;
+  border: 4px solid rgba(255,255,255,0.18);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.loader-text {
+  color: #ffffff;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="preloader" id="preloader">
+    <div class="loader-wrap">
+      <div class="spinner"></div>
+      <div class="loader-text">Loading</div>
+    </div>
+  </div>
+
+  <div class="rive-container" id="riveContainer">
+    <canvas id="riveCanvas"></canvas>
+  </div>
+</div>
+
+<script src="https://unpkg.com/@rive-app/webgl2"></script>
+<script>
+const canvas = document.getElementById("riveCanvas");
+const preloader = document.getElementById("preloader");
+const riveContainer = document.getElementById("riveContainer");
+
+const rewards = [
+  { reward_type: "dollars",     reward_number: "$50"   },
+  { reward_type: "dollars", reward_number: "$10"  },
+  { reward_type: "dollars", reward_number: "$0.50"  },
+  { reward_type: "dollars", reward_number: "$1" },
+  { reward_type: "dollars", reward_number: "$2"   },
+  { reward_type: "dollars",     reward_number: "$6" },
+   { reward_type: "dollars",     reward_number: "$0.4" },
+    { reward_type: "dollars",     reward_number: "$0.1" }
+];
+
+const forcedWinner = null; // example: 3
+let riveInstance;
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function setString(vmi, path, value) {
+  const prop = vmi.string(path);
+  if (!prop) throw new Error(`Missing string property: ${path}`);
+  prop.value = String(value);
+}
+
+function setNumber(vmi, path, value) {
+  const prop = vmi.number(path);
+  if (!prop) throw new Error(`Missing number property: ${path}`);
+  prop.value = Number(value);
+}
+
+function setEnum(vmi, path, value) {
+  const prop = vmi.enum(path);
+  if (!prop) throw new Error(`Missing enum property: ${path}`);
+  prop.value = value;
+}
+
+function fireTrigger(vmi, path) {
+  const prop = vmi.trigger(path);
+  if (!prop) {
+    console.warn(`Trigger not found: ${path}`);
+    return;
+  }
+  prop.trigger();
+}
+
+riveInstance = new rive.Rive({
+  src: "fortune_wheel2.riv",
+  canvas,
+  artboard: "wheeloffortune",
+  stateMachines: "State Machine 2",
+  autoplay: true,
+
+  // IMPORTANT:
+  // This uses the artboard's default View Model + default instance.
+  // In Rive editor, the artboard must already be linked to that VM.
+  autoBind: true,
+
+  onLoad: () => {
+    riveInstance.resizeDrawingSurfaceToCanvas();
+
+    requestAnimationFrame(() => {
+      riveContainer.classList.add("loaded");
+      preloader.classList.add("hidden");
+    });
+
+    console.log("Rive loaded");
+
+    try {
+      const vmi = riveInstance.viewModelInstance;
+
+      if (!vmi) {
+        throw new Error(
+          "No bound ViewModelInstance found. In Rive, assign a default View Model to the artboard and mark a default instance."
+        );
+      }
+
+      console.log("Bound VMI:", vmi);
+      console.log("View model name:", vmi.viewModelName);
+
+      // Fill slot1..slot6
+      rewards.forEach((reward, i) => {
+        const slot = `slot${i + 1}`;
+
+        // If reward_type is a STRING in Rive, use setString(...)
+        // If reward_type is an ENUM in Rive, comment out setString and use setEnum instead.
+        setString(vmi, `${slot}/reward_type`, reward.reward_type);
+        // setEnum(vmi, `${slot}/reward_type`, reward.reward_type);
+
+        // If reward_number is a STRING in Rive, use setString(...)
+        // If reward_number is a NUMBER in Rive, use setNumber instead.
+        setString(vmi, `${slot}/reward_number`, reward.reward_number);
+        // setNumber(vmi, `${slot}/reward_number`, reward.reward_number);
+      });
+
+      const winner = forcedWinner ?? randomInt(1, rewards.length);
+
+      // If selected_index in Rive is a NUMBER:
+      setNumber(vmi, "selected_index", winner);
+
+      // If selected_index in Rive is an ENUM or STRING, change the setter accordingly.
+      // setString(vmi, "selected_index", String(winner));
+
+      console.log("Winner index:", winner);
+
+      // Optional trigger if your VM has one
+      // Change "spin" to the exact trigger property name in your View Model
+      fireTrigger(vmi, "spin");
+
+      console.log("Rewards injected successfully");
+    } catch (err) {
+      console.error("Binding error:", err);
+    }
+  },
+
+  onLoadError: (err) => {
+    console.error("Rive load error:", err);
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (riveInstance) riveInstance.resizeDrawingSurfaceToCanvas();
+});
+</script>
+</body>
+</html>
