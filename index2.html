@@ -284,36 +284,41 @@ async function startSpin() {
 
   setBoolean("slow_down", true);
 
+  await new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+
   const randomAngle = Math.random() * 360;
   const p3Start = currentRotation;
-  const p3End = p3Start + 360 + randomAngle;
-  await animateRotation(p3Start, p3End, 2600, easeOutQuart);
+  const p3End = p3Start + 3 * 360 + randomAngle;
 
+  await animateRotation(p3Start, p3End, 5200, easeOutQuart);
+
+  // Now the wheel has stopped - set the final angle and lock it
   const finalAngle = normalizeAngle(currentRotation);
-  const selectedSlot = getSlotFromAngle(finalAngle);
-
   lockedAngle = finalAngle;
   rewardLocked = true;
 
+  const selectedSlot = getSlotFromAngle(finalAngle);
+
   setSelectedReward(selectedSlot);
 
-  // lock wheel before reward state starts
-  setNumber("rotation", lockedAngle);
+  // Set stop_spin AFTER wheel has stopped and reward is set
+  setBoolean("stop_spin", true);
 
   fireTrigger(`won${selectedSlot}`);
-  setBoolean("stop_spin", true);
 
   console.log("finalAngle:", finalAngle);
   console.log("selectedSlot:", selectedSlot);
   console.log("fired:", `won${selectedSlot}`);
 
+  // Keep enforcing the final rotation for a period
   let lockFrames = 0;
 
   function lockRewardRotation() {
     setNumber("rotation", lockedAngle);
 
     lockFrames++;
-
     if (lockFrames < 300) {
       requestAnimationFrame(lockRewardRotation);
     } else {
@@ -363,6 +368,10 @@ riveInstance = new rive.Rive({
     setBoolean("stop_spin", false);
 
     canvas.addEventListener("click", startSpin);
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      startSpin();
+    });
 
     console.log("Rive ready");
   },
