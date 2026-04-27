@@ -87,6 +87,7 @@ html, body {
 }
 </style>
 </head>
+
 <body>
 <div class="page">
   <div class="preloader" id="preloader">
@@ -108,60 +109,230 @@ const preloader = document.getElementById("preloader");
 const riveContainer = document.getElementById("riveContainer");
 
 const rewards = [
-  { reward_type: "dollars",     reward_number: "$50"   },
-  { reward_type: "dollars", reward_number: "$10"  },
-  { reward_type: "dollars", reward_number: "$0.50"  },
   { reward_type: "dollars", reward_number: "$1" },
-  { reward_type: "dollars", reward_number: "$2"   },
-  { reward_type: "dollars",     reward_number: "$6" },
-   { reward_type: "dollars",     reward_number: "$0.4" },
-    { reward_type: "dollars",     reward_number: "$0.1" }
+  { reward_type: "dollars", reward_number: "$2" },
+  { reward_type: "dollars", reward_number: "$3" },
+  { reward_type: "dollars", reward_number: "$4" },
+  { reward_type: "dollars", reward_number: "$5" },
+  { reward_type: "dollars", reward_number: "$6" },
+  { reward_type: "dollars", reward_number: "$7" },
+  { reward_type: "dollars", reward_number: "$8" }
 ];
 
-const forcedWinner = null; // example: 3
 let riveInstance;
+let vmi;
 
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+let isSpinning = false;
+let currentRotation = 0;
+let lastEdgeIndex = -1;
+
+let rewardLocked = false;
+let lockedAngle = 0;
+
+const SLOT_OFFSET = 90;
+
+// -------------------------
+// ViewModel helpers
+// -------------------------
+function setString(path, value) {
+  const prop = vmi?.string(path);
+  if (prop) prop.value = String(value);
+  else console.warn("Missing string:", path);
 }
 
-function setString(vmi, path, value) {
-  const prop = vmi.string(path);
-  if (!prop) throw new Error(`Missing string property: ${path}`);
-  prop.value = String(value);
-}
+function setNumber(path, value) {
+  if (path === "rotation") {
+    if (rewardLocked && Math.abs(Number(value)) < 0.001) {
+      console.warn("Blocked rotation reset to 0");
+      value = lockedAngle;
+    }
 
-function setNumber(vmi, path, value) {
-  const prop = vmi.number(path);
-  if (!prop) throw new Error(`Missing number property: ${path}`);
-  prop.value = Number(value);
-}
-
-function setEnum(vmi, path, value) {
-  const prop = vmi.enum(path);
-  if (!prop) throw new Error(`Missing enum property: ${path}`);
-  prop.value = value;
-}
-
-function fireTrigger(vmi, path) {
-  const prop = vmi.trigger(path);
-  if (!prop) {
-    console.warn(`Trigger not found: ${path}`);
-    return;
+    console.log("SET ROTATION:", value);
   }
-  prop.trigger();
+
+  const prop = vmi?.number(path);
+  if (prop) prop.value = Number(value);
+  else console.warn("Missing number:", path);
 }
 
+function setBoolean(path, value) {
+  const prop = vmi?.boolean(path);
+  if (prop) prop.value = Boolean(value);
+  else console.warn("Missing boolean:", path);
+}
+
+function fireTrigger(path) {
+  const prop = vmi?.trigger(path);
+  if (prop) prop.trigger();
+  else console.warn("Missing trigger:", path);
+}
+
+// -------------------------
+// Rewards
+// -------------------------
+function injectRewards() {
+  rewards.forEach((reward, index) => {
+    const slot = index + 1;
+    setString(`slot${slot}/reward_type`, reward.reward_type);
+    setString(`slot${slot}/reward_number`, reward.reward_number);
+  });
+
+  console.log("Rewards populated");
+}
+
+function setSelectedReward(slot) {
+  const reward = rewards[slot - 1];
+
+  setNumber("selected_index", slot);
+  setString("selectedSlot/reward_type", reward.reward_type);
+  setString("selectedSlot/reward_number", reward.reward_number);
+
+  console.log("JS selected reward:", slot, reward);
+}
+
+// -------------------------
+// Easing
+// -------------------------
+function easeInCubic(t) {
+  return t * t * t;
+}
+
+function linear(t) {
+  return t;
+}
+
+function easeOutQuart(t) {
+  return 1 - Math.pow(1 - t, 4);
+}
+
+// -------------------------
+// Rotation
+// -------------------------
+function normalizeAngle(value) {
+  return ((value % 360) + 360) % 360;
+}
+
+function setWheelRotation(value, allowTick = true) {
+  currentRotation = value;
+
+  const displayRotation = normalizeAngle(value);
+  setNumber("rotation", displayRotation);
+
+  const edgeIndex = Math.floor(displayRotation / 45);
+
+  if (allowTick && edgeIndex !== lastEdgeIndex) {
+    lastEdgeIndex = edgeIndex;
+    fireTick();
+  }
+}
+
+function animateRotation(from, to, duration, ease) {
+  return new Promise(resolve => {
+    const startTime = performance.now();
+
+    function frame(now) {
+      const t = Math.min((now - startTime) / duration, 1);
+      const eased = ease(t);
+      const value = from + (to - from) * eased;
+
+      setWheelRotation(value, true);
+
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        resolve();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  });
+}
+
+function getSlotFromAngle(angle) {
+  let a = ((angle + SLOT_OFFSET) % 360 + 360) % 360;
+  a = (a + 22.5) % 360;
+  return Math.floor(a / 45) + 1;
+}
+
+function fireTick() {
+  fireTrigger("tick");
+}
+
+// -------------------------
+// Spin
+// -------------------------
+async function startSpin() {
+  if (!vmi || isSpinning) return;
+
+  isSpinning = true;
+  rewardLocked = false;
+  lockedAngle = 0;
+  lastEdgeIndex = -1;
+
+  setBoolean("slow_down", false);
+  setBoolean("stop_spin", false);
+
+  fireTrigger("click");
+
+  const p1Start = currentRotation;
+  const p1End = p1Start + 4 * 360;
+  await animateRotation(p1Start, p1End, 3500, easeInCubic);
+
+  const p2Start = currentRotation;
+  const p2End = p2Start + 360;
+  await animateRotation(p2Start, p2End, 700, linear);
+
+  setBoolean("slow_down", true);
+
+  const randomAngle = Math.random() * 360;
+  const p3Start = currentRotation;
+  const p3End = p3Start + 360 + randomAngle;
+  await animateRotation(p3Start, p3End, 2600, easeOutQuart);
+
+  const finalAngle = normalizeAngle(currentRotation);
+  const selectedSlot = getSlotFromAngle(finalAngle);
+
+  lockedAngle = finalAngle;
+  rewardLocked = true;
+
+  setSelectedReward(selectedSlot);
+
+  // lock wheel before reward state starts
+  setNumber("rotation", lockedAngle);
+
+  fireTrigger(`won${selectedSlot}`);
+  setBoolean("stop_spin", true);
+
+  console.log("finalAngle:", finalAngle);
+  console.log("selectedSlot:", selectedSlot);
+  console.log("fired:", `won${selectedSlot}`);
+
+  let lockFrames = 0;
+
+  function lockRewardRotation() {
+    setNumber("rotation", lockedAngle);
+
+    lockFrames++;
+
+    if (lockFrames < 300) {
+      requestAnimationFrame(lockRewardRotation);
+    } else {
+      isSpinning = false;
+    }
+  }
+
+  requestAnimationFrame(lockRewardRotation);
+}
+
+// -------------------------
+// Rive init
+// -------------------------
 riveInstance = new rive.Rive({
-  src: "fortune_wheel2.riv",
+  src: "lucky_wheel1.riv",
   canvas,
   artboard: "wheeloffortune",
   stateMachines: "State Machine 2",
   autoplay: true,
-
-  // IMPORTANT:
-  // This uses the artboard's default View Model + default instance.
-  // In Rive editor, the artboard must already be linked to that VM.
   autoBind: true,
 
   onLoad: () => {
@@ -172,56 +343,31 @@ riveInstance = new rive.Rive({
       preloader.classList.add("hidden");
     });
 
-    console.log("Rive loaded");
+    vmi = riveInstance.viewModelInstance;
 
-    try {
-      const vmi = riveInstance.viewModelInstance;
-
-      if (!vmi) {
-        throw new Error(
-          "No bound ViewModelInstance found. In Rive, assign a default View Model to the artboard and mark a default instance."
-        );
-      }
-
-      console.log("Bound VMI:", vmi);
-      console.log("View model name:", vmi.viewModelName);
-
-      // Fill slot1..slot6
-      rewards.forEach((reward, i) => {
-        const slot = `slot${i + 1}`;
-
-        // If reward_type is a STRING in Rive, use setString(...)
-        // If reward_type is an ENUM in Rive, comment out setString and use setEnum instead.
-        setString(vmi, `${slot}/reward_type`, reward.reward_type);
-        // setEnum(vmi, `${slot}/reward_type`, reward.reward_type);
-
-        // If reward_number is a STRING in Rive, use setString(...)
-        // If reward_number is a NUMBER in Rive, use setNumber instead.
-        setString(vmi, `${slot}/reward_number`, reward.reward_number);
-        // setNumber(vmi, `${slot}/reward_number`, reward.reward_number);
-      });
-
-      const winner = forcedWinner ?? randomInt(1, rewards.length);
-
-      // If selected_index in Rive is a NUMBER:
-      setNumber(vmi, "selected_index", winner);
-
-      // If selected_index in Rive is an ENUM or STRING, change the setter accordingly.
-      // setString(vmi, "selected_index", String(winner));
-
-      console.log("Winner index:", winner);
-
-      // Optional trigger if your VM has one
-      // Change "spin" to the exact trigger property name in your View Model
-      fireTrigger(vmi, "spin");
-
-      console.log("Rewards injected successfully");
-    } catch (err) {
-      console.error("Binding error:", err);
+    if (!vmi) {
+      console.error("No bound ViewModelInstance found.");
+      return;
     }
+
+    injectRewards();
+
+    currentRotation = 0;
+    lastEdgeIndex = -1;
+    rewardLocked = false;
+    lockedAngle = 0;
+
+    setWheelRotation(0, false);
+
+    setBoolean("slow_down", false);
+    setBoolean("stop_spin", false);
+
+    canvas.addEventListener("click", startSpin);
+
+    console.log("Rive ready");
   },
 
-  onLoadError: (err) => {
+  onLoadError: err => {
     console.error("Rive load error:", err);
   }
 });
