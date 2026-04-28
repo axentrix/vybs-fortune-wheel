@@ -246,11 +246,14 @@ function setWheelRotation(value, allowTick = true, tickSpeed = 1.0) {
   }
 }
 
-function animateRotation(from, to, duration, ease, disableTicksAtEnd = false) {
+let lastSlowTickFired = false;
+
+function animateRotation(from, to, duration, ease, useSlowTickAtEnd = false) {
   return new Promise(resolve => {
     const startTime = performance.now();
     const totalDistance = to - from;
     let lastT = 0;
+    lastSlowTickFired = false;
 
     function frame(now) {
       const elapsed = now - startTime;
@@ -270,9 +273,21 @@ function animateRotation(from, to, duration, ease, disableTicksAtEnd = false) {
         stateMachine.speed = stateMachineSpeed;
       }
 
-      // Disable automatic ticks only in the final 5% if requested
-      const allowAutoTicks = !(disableTicksAtEnd && t > 0.95);
-      setWheelRotation(value, allowAutoTicks);
+      // Check if we should fire slow tick (when within last 10° and haven't fired yet)
+      const distanceRemaining = to - value;
+      if (useSlowTickAtEnd && !lastSlowTickFired && distanceRemaining < 10 && distanceRemaining > 0) {
+        console.log("Firing SLOW tick during final approach (10° remaining)");
+        fireTick(true);
+        lastSlowTickFired = true;
+        // Don't fire regular ticks anymore
+        setWheelRotation(value, false);
+      } else if (useSlowTickAtEnd && lastSlowTickFired) {
+        // After slow tick fired, no more automatic ticks
+        setWheelRotation(value, false);
+      } else {
+        // Normal automatic ticks
+        setWheelRotation(value, true);
+      }
       
       lastT = t;
 
@@ -347,15 +362,8 @@ async function startSpin() {
   const easingFunction = shouldSettleToEdge ? easeOutBack : easeOutQuart;
 
   // Much slower deceleration - 8.5 seconds total
-  // Disable ticks in final 15% to avoid double-tick on bounce-back
+  // Slow tick fires automatically during final 45° if targeting edge
   await animateRotation(spinStart, spinEnd, 8500, easingFunction, shouldSettleToEdge);
-  
-  // Fire ONE final SLOW tick if settled to edge
-  if (shouldSettleToEdge) {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    fireTick(true); // Use slow tick animation
-    await new Promise(resolve => setTimeout(resolve, 1200)); // Wait longer for slow animation
-  }
 
   // Wait a moment for Rive to fully apply the final rotation
   await new Promise(resolve => setTimeout(resolve, 100));
