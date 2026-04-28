@@ -273,10 +273,10 @@ function animateRotation(from, to, duration, ease, useSlowTickAtEnd = false) {
         stateMachine.speed = stateMachineSpeed;
       }
 
-      // Check if we should fire slow tick (when within last 10° and haven't fired yet)
+      // Check if we should fire slow tick (when within last 8° and haven't fired yet)
       const distanceRemaining = to - value;
-      if (useSlowTickAtEnd && !lastSlowTickFired && distanceRemaining < 10 && distanceRemaining > 0) {
-        console.log("Firing SLOW tick during final approach (10° remaining)");
+      if (useSlowTickAtEnd && !lastSlowTickFired && distanceRemaining < 8 && distanceRemaining > 0) {
+        console.log("Firing SLOW tick during final approach (8° remaining)");
         fireTick(true);
         lastSlowTickFired = true;
         // Don't fire regular ticks anymore
